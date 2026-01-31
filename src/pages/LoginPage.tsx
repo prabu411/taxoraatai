@@ -70,10 +70,20 @@ const LoginPage = () => {
             </Button>
           </form>
           <div className="mt-4 text-center text-sm">
-            Don&apos;t have an account?{" "}
-            <a href="#" className="underline text-primary">
-              Contact Support
-            </a>
+            <div className="mb-2">
+              <strong>Test Credentials:</strong>
+            </div>
+            <div className="text-xs space-y-1 text-muted-foreground">
+              <div>Admin: admin@taxora.com / admin123</div>
+              <div>User: user@taxora.com / user123</div>
+              <div>User: ganesh@taxora.com / ganesh123</div>
+            </div>
+            <div className="mt-3">
+              Don&apos;t have an account?{" "}
+              <a href="#" className="underline text-primary">
+                Contact Support
+              </a>
+            </div>
           </div>
         </div>
       </div>

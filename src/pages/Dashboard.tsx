@@ -18,16 +18,24 @@ const Dashboard = () => {
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/');
-    } else if (user?.role === 'admin') {
+      return;
+    }
+    
+    // Set default section based on user role
+    if (user?.role === 'admin') {
       setActiveSection('admin');
+    } else {
+      setActiveSection('overview');
     }
   }, [isAuthenticated, navigate, user]);
 
   const renderSection = () => {
+    // Admin users can only access admin panel
     if (user?.role === 'admin') {
       return <AdminDashboard />;
     }
 
+    // Regular users access their dashboard sections
     switch (activeSection) {
       case 'overview':
         return <DashboardOverview />;

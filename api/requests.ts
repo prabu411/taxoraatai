@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ObjectId } from 'mongodb';
-import clientPromise from './_lib/mongodb'; // CORRECTED IMPORT PATH
+import clientPromise from '../src/lib/mongodb';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const client = await clientPromise;
