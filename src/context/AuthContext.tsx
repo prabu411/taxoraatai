@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import clientPromise from '@/lib/mongodb';
+
+// All database logic has been moved to /api routes. This file now only makes fetch calls.
 
 export type UserRole = 'user' | 'admin' | null;
 
@@ -31,10 +32,10 @@ interface AuthContextType {
   logout: () => void;
   isAuthenticated: boolean;
   marketRates: MarketRates;
-  updateMarketRates: (rates: Partial<MarketRates>) => void;
+  updateMarketRates: (rates: Partial<Omit<MarketRates, 'lastUpdated'>>) => Promise<void>;
   adminRequests: AdminRequest[];
-  addAdminRequest: (message: string) => void;
-  resolveRequest: (id: string) => void;
+  addAdminRequest: (message: string) => Promise<void>;
+  resolveRequest: (id: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,69 +51,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [adminRequests, setAdminRequests] = useState<AdminRequest[]>([]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      const client = await clientPromise;
-      const db = client.db();
-      const rates = await db.collection('marketRates').findOne({});
-      if (rates) {
-        setMarketRates(rates as any);
+    const fetchAppData = async () => {
+      try {
+        const response = await fetch('/api/app-data');
+        const data = await response.json();
+        if (response.ok && data.success) {
+          if (data.marketRates) setMarketRates(data.marketRates);
+          if (data.adminRequests) setAdminRequests(data.adminRequests);
+        }
+      } catch (error) {
+        console.error("Failed to fetch app data:", error);
       }
-      const requests = await db.collection('adminRequests').find({}).toArray();
-      setAdminRequests(requests as any);
     };
-    fetchData();
+    fetchAppData();
   }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    const client = await clientPromise;
-    const db = client.db();
-    const userRecord = await db.collection('users').findOne({ email });
-    if (userRecord && userRecord.password === password) {
-      setUser({ email, name: userRecord.name as string, role: userRecord.role as UserRole });
-      return true;
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setUser(data.user);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Login failed:", error);
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
     setUser(null);
   };
 
-  const updateMarketRates = async (rates: Partial<MarketRates>) => {
-    const newRates = {
-      ...marketRates,
-      ...rates,
-      lastUpdated: new Date().toISOString(),
-    };
-    setMarketRates(newRates);
-    const client = await clientPromise;
-    const db = client.db();
-    await db.collection('marketRates').updateOne({}, { $set: newRates }, { upsert: true });
-  };
-
   const addAdminRequest = async (message: string) => {
     if (!user) return;
-    const newRequest = {
-      userId: user.email,
-      userName: user.name,
-      message,
-      status: 'pending' as const,
-      createdAt: new Date().toISOString(),
-    };
-    const client = await clientPromise;
-    const db = client.db();
-    const result = await db.collection('adminRequests').insertOne(newRequest);
-    setAdminRequests(prev => [...prev, { ...newRequest, _id: result.insertedId.toString() }]);
+    try {
+      const response = await fetch('/api/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.email, userName: user.name, message }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setAdminRequests(prev => [data.request, ...prev]);
+      }
+    } catch (error) {
+      console.error("Failed to add admin request:", error);
+    }
   };
 
   const resolveRequest = async (id: string) => {
-    setAdminRequests(prev =>
-      prev.map(req => (req._id === id ? { ...req, status: 'resolved' } : req))
-    );
-    const client = await clientPromise;
-    const db = client.db();
-    const { ObjectId } = await import('mongodb');
-    await db.collection('adminRequests').updateOne({ _id: new ObjectId(id) }, { $set: { status: 'resolved' } });
+    try {
+      const response = await fetch('/api/requests', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (response.ok) {
+        setAdminRequests(prev =>
+          prev.map(req => (req._id === id ? { ...req, status: 'resolved' } : req))
+        );
+      }
+    } catch (error) {
+      console.error("Failed to resolve request:", error);
+    }
+  };
+
+  const updateMarketRates = async (rates: Partial<Omit<MarketRates, 'lastUpdated'>>) => {
+    try {
+      const response = await fetch('/api/market-rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rates),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setMarketRates(data.updatedRates);
+      }
+    } catch (error) {
+      console.error("Failed to update market rates:", error);
+    }
   };
 
   return (

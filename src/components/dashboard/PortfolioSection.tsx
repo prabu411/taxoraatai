@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,18 +10,14 @@ import {
   TrendingUp, 
   Landmark, 
   PiggyBank,
-  CreditCard,
   Plus,
   Trash2,
-  Calendar,
-  Percent,
-  IndianRupee,
-  Copy,
-  FileText
+  Calendar
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
-import clientPromise from '@/lib/mongodb';
+
+// All database logic has been moved to /api routes. This file now only makes fetch calls.
 
 interface FDRDEntry {
   _id?: string;
@@ -68,112 +64,119 @@ const PortfolioSection = () => {
     maturityDate: '',
   });
 
-  const [pastedPortfolio, setPastedPortfolio] = useState('');
+  const [hufPfForm, setHufPfForm] = useState({ hufPan: '', hufAssets: '', epfBalance: '', npsBalance: '' });
 
   useEffect(() => {
+    if (!user) return;
     const fetchData = async () => {
-      if (!user) return;
-      const client = await clientPromise;
-      const db = client.db();
-      const fdrd = await db.collection('fdrd').find({ userId: user.email }).toArray();
-      setFdrdEntries(fdrd as any);
-      const stocks = await db.collection('stocks').find({ userId: user.email }).toArray();
-      setStocks(stocks as any);
-      const hufPfData = await db.collection('hufPf').findOne({ userId: user.email });
-      setHufPf(hufPfData as any);
+      try {
+        const response = await fetch(`/api/portfolio?userId=${user.email}`);
+        const data = await response.json();
+        if (data.success) {
+          setFdrdEntries(data.fdrd || []);
+          setStocks(data.stocks || []);
+          if (data.hufPf) {
+            setHufPf(data.hufPf);
+            setHufPfForm({
+              hufPan: data.hufPf.hufPan || '',
+              hufAssets: data.hufPf.hufAssets?.toString() || '',
+              epfBalance: data.hufPf.epfBalance?.toString() || '',
+              npsBalance: data.hufPf.npsBalance?.toString() || '',
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch portfolio data:", error);
+        toast({ title: 'Error', description: 'Could not load portfolio data.', variant: 'destructive' });
+      }
     };
     fetchData();
-  }, [user]);
+  }, [user, toast]);
 
   const addFDRD = async () => {
     if (!newFDRD.bankName || !newFDRD.principal || !user) {
       toast({ title: 'Error', description: 'Please fill all required fields', variant: 'destructive' });
       return;
     }
-    const entry: FDRDEntry = {
-      userId: user.email,
-      ...newFDRD,
-      principal: parseFloat(newFDRD.principal),
-      interestRate: parseFloat(newFDRD.interestRate),
-    };
-    const client = await clientPromise;
-    const db = client.db();
-    const result = await db.collection('fdrd').insertOne(entry);
-    setFdrdEntries([...fdrdEntries, { ...entry, _id: result.insertedId.toString() }]);
-    setNewFDRD({ type: 'FD', bankName: '', principal: '', interestRate: '', investmentDate: '', maturityDate: '' });
-    toast({ title: 'Added Successfully', description: `${entry.type} entry added to your portfolio` });
+    try {
+      const response = await fetch('/api/portfolio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.email,
+          type: 'fdrd',
+          data: { ...newFDRD, principal: parseFloat(newFDRD.principal), interestRate: parseFloat(newFDRD.interestRate) }
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setFdrdEntries(prev => [...prev, { ...newFDRD, _id: result.insertedId, userId: user.email, principal: parseFloat(newFDRD.principal), interestRate: parseFloat(newFDRD.interestRate) }]);
+        setNewFDRD({ type: 'FD', bankName: '', principal: '', interestRate: '', investmentDate: '', maturityDate: '' });
+        toast({ title: 'Added Successfully' });
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: 'Could not add entry.', variant: 'destructive' });
+    }
   };
 
   const deleteFDRD = async (id: string) => {
-    if(!user) return;
-    const client = await clientPromise;
-    const db = client.db();
-    const { ObjectId } = await import('mongodb');
-    await db.collection('fdrd').deleteOne({ _id: new ObjectId(id), userId: user.email });
-    setFdrdEntries(fdrdEntries.filter(e => e._id !== id));
-    toast({ title: 'Deleted', description: 'Entry removed from portfolio' });
-  };
-
-  const parsePortfolio = async () => {
-    if(!user) return;
-    const lines = pastedPortfolio.trim().split('\n');
-    const parsed: StockHolding[] = [];
-    
-    lines.forEach((line) => {
-      const parts = line.split(/[\t,]+/).map(p => p.trim());
-      if (parts.length >= 3) {
-        parsed.push({
-          userId: user.email,
-          symbol: parts[0].toUpperCase(),
-          quantity: parseInt(parts[1]) || 0,
-          avgPrice: parseFloat(parts[2]) || 0,
-          currentPrice: parseFloat(parts[3]) || parseFloat(parts[2]) || 0,
-        });
-      }
-    });
-
-    if (parsed.length > 0) {
-      const client = await clientPromise;
-      const db = client.db();
-      const result = await db.collection('stocks').insertMany(parsed);
-      const newStocks = parsed.map((stock, i) => ({ ...stock, _id: result.insertedIds[i].toString() }));
-      setStocks([...stocks, ...newStocks]);
-      setPastedPortfolio('');
-      toast({ title: 'Portfolio Imported', description: `${parsed.length} stocks added to your portfolio` });
-    } else {
-      toast({ title: 'Parse Error', description: 'Could not parse portfolio data. Use format: SYMBOL, QTY, AVG_PRICE', variant: 'destructive' });
+    if (!user) return;
+    try {
+      await fetch('/api/portfolio', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.email, type: 'fdrd', id }),
+      });
+      setFdrdEntries(fdrdEntries.filter(e => e._id !== id));
+      toast({ title: 'Deleted' });
+    } catch (error) {
+      toast({ title: 'Error', description: 'Could not delete entry.', variant: 'destructive' });
     }
   };
 
   const updateHufPf = async (data: Partial<HUFPF>) => {
     if (!user) return;
-    const client = await clientPromise;
-    const db = client.db();
-    const result = await db.collection('hufPf').updateOne(
-      { userId: user.email },
-      { $set: { ...data, userId: user.email } },
-      { upsert: true }
-    );
-    const updatedHufPf = await db.collection('hufPf').findOne({ userId: user.email });
-    setHufPf(updatedHufPf as any);
-    toast({ title: 'Updated', description: 'HUF/PF details have been updated.' });
+    try {
+      await fetch('/api/portfolio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.email, type: 'hufPf', data }),
+      });
+      setHufPf(prev => ({ ...(prev || { userId: user.email }), ...data }));
+      toast({ title: 'Updated', description: 'HUF/PF details have been saved.' });
+    } catch (error) {
+      toast({ title: 'Error', description: 'Could not save details.', variant: 'destructive' });
+    }
+  };
+
+  const handleHufSubmit = () => {
+    const dataToSave = {
+      hufPan: hufPfForm.hufPan,
+      hufAssets: parseFloat(hufPfForm.hufAssets) || undefined,
+    };
+    updateHufPf(dataToSave);
+  };
+
+  const handlePensionSubmit = () => {
+    const dataToSave = {
+      epfBalance: parseFloat(hufPfForm.epfBalance) || undefined,
+      npsBalance: parseFloat(hufPfForm.npsBalance) || undefined,
+    };
+    updateHufPf(dataToSave);
   };
 
   const totalFDRD = fdrdEntries.reduce((sum, e) => sum + e.principal, 0);
   const totalStocksValue = stocks.reduce((sum, s) => sum + (s.quantity * s.currentPrice), 0);
-  const totalStocksCost = stocks.reduce((sum, s) => sum + (s.quantity * s.avgPrice), 0);
-  const stocksPnL = totalStocksValue - totalStocksCost;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-display font-bold">Portfolio Overview</h2>
           <p className="text-muted-foreground">Track your investments across all asset classes</p>
         </div>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="glass-card stat-card">
           <CardContent className="p-6">
@@ -189,25 +192,6 @@ const PortfolioSection = () => {
             <TrendingUp className="w-8 h-8 text-primary mb-3" />
             <p className="text-sm text-muted-foreground">Stocks Value</p>
             <p className="text-2xl font-bold">₹{totalStocksValue.toLocaleString()}</p>
-            <p className={`text-xs mt-1 ${stocksPnL >= 0 ? 'text-success' : 'text-destructive'}`}>
-              {stocksPnL >= 0 ? '+' : ''}₹{stocksPnL.toLocaleString()} P&L
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card stat-card">
-          <CardContent className="p-6">
-            <PiggyBank className="w-8 h-8 text-primary mb-3" />
-            <p className="text-sm text-muted-foreground">Total Invested</p>
-            <p className="text-2xl font-bold">₹{(totalFDRD + totalStocksCost).toLocaleString()}</p>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card stat-card">
-          <CardContent className="p-6">
-            <CreditCard className="w-8 h-8 text-primary mb-3" />
-            <p className="text-sm text-muted-foreground">Current Value</p>
-            <p className="text-2xl font-bold">₹{(totalFDRD + totalStocksValue).toLocaleString()}</p>
           </CardContent>
         </Card>
       </div>
@@ -219,20 +203,14 @@ const PortfolioSection = () => {
           <TabsTrigger value="others">HUF & Pension</TabsTrigger>
         </TabsList>
 
-        {/* FD/RD Tab */}
         <TabsContent value="fdrd" className="space-y-4">
           <Card className="glass-card">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Landmark className="w-5 h-5 text-primary" />
-                Fixed & Recurring Deposits
-              </CardTitle>
-              <CardDescription>Manage your bank deposits</CardDescription>
+              <CardTitle>Fixed & Recurring Deposits</CardTitle>
             </CardHeader>
             <CardContent>
-              {/* Add New Form */}
               <div className="grid grid-cols-1 md:grid-cols-6 gap-3 p-4 rounded-lg bg-secondary/20 mb-4">
-                <div>
+                 <div>
                   <Label className="text-xs">Type</Label>
                   <select 
                     className="w-full h-10 rounded-md bg-secondary border-border text-sm px-2"
@@ -289,7 +267,6 @@ const PortfolioSection = () => {
                 </div>
               </div>
 
-              {/* Entries Table */}
               <div className="overflow-x-auto">
                 <table className="table-premium">
                   <thead>
@@ -331,150 +308,68 @@ const PortfolioSection = () => {
           </Card>
         </TabsContent>
 
-        {/* Stocks Tab */}
-        <TabsContent value="stocks" className="space-y-4">
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-primary" />
-                Stock Holdings
-              </CardTitle>
-              <CardDescription>Import from Zerodha, Groww, or other brokers</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {/* Copy Portfolio Feature */}
-              <div className="p-4 rounded-lg bg-secondary/20 mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Copy className="w-4 h-4 text-primary" />
-                  <Label className="font-medium">Paste Portfolio Data</Label>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Copy from your broker (format: SYMBOL, QTY, AVG_PRICE per line)
-                </p>
-                <textarea
-                  className="w-full h-24 p-3 rounded-md bg-secondary border-border text-sm resize-none"
-                  placeholder="RELIANCE, 10, 2450&#10;TCS, 5, 3800&#10;INFY, 15, 1650"
-                  value={pastedPortfolio}
-                  onChange={(e) => setPastedPortfolio(e.target.value)}
-                />
-                <Button onClick={parsePortfolio} className="mt-2" variant="outline">
-                  <FileText className="w-4 h-4 mr-2" />
-                  Import Portfolio
-                </Button>
-              </div>
-
-              {/* Stocks Table */}
-              <div className="overflow-x-auto">
-                <table className="table-premium">
-                  <thead>
-                    <tr>
-                      <th>Symbol</th>
-                      <th>Qty</th>
-                      <th>Avg Price</th>
-                      <th>Current</th>
-                      <th>Value</th>
-                      <th>P&L</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stocks.map((stock) => {
-                      const value = stock.quantity * stock.currentPrice;
-                      const cost = stock.quantity * stock.avgPrice;
-                      const pnl = value - cost;
-                      const pnlPercent = ((pnl / cost) * 100).toFixed(2);
-                      return (
-                        <tr key={stock._id}>
-                          <td className="font-medium text-primary">{stock.symbol}</td>
-                          <td>{stock.quantity}</td>
-                          <td>₹{stock.avgPrice.toLocaleString()}</td>
-                          <td>₹{stock.currentPrice.toLocaleString()}</td>
-                          <td>₹{value.toLocaleString()}</td>
-                          <td className={pnl >= 0 ? 'text-success' : 'text-destructive'}>
-                            {pnl >= 0 ? '+' : ''}₹{pnl.toLocaleString()} ({pnlPercent}%)
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* HUF & Pension Tab */}
         <TabsContent value="others" className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card className="glass-card">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-primary" />
-                  HUF (Hindu Undivided Family)
-                </CardTitle>
+                <CardTitle>HUF (Hindu Undivided Family)</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="p-4 rounded-lg bg-secondary/20">
-                    <Label className="text-sm text-muted-foreground">HUF PAN</Label>
-                    <Input
-                      className="input-premium mt-1"
-                      placeholder="AABCH1234F"
-                      value={hufPf?.hufPan || ''}
-                      onChange={(e) => setHufPf({ ...hufPf, userId: user!.email, hufPan: e.target.value })}
-                    />
-                  </div>
-                  <div className="p-4 rounded-lg bg-secondary/20">
-                    <Label className="text-sm text-muted-foreground">Total Assets</Label>
-                    <Input
-                      type="number"
-                      className="input-premium mt-1"
-                      placeholder="1500000"
-                      value={hufPf?.hufAssets || ''}
-                      onChange={(e) => setHufPf({ ...hufPf, userId: user!.email, hufAssets: parseFloat(e.target.value) })}
-                    />
-                  </div>
-                  <Button variant="outline" className="w-full" onClick={() => updateHufPf({ hufPan: hufPf?.hufPan, hufAssets: hufPf?.hufAssets })}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Save HUF Details
-                  </Button>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label>HUF PAN</Label>
+                  <Input
+                    className="input-premium mt-1"
+                    placeholder="AABCH1234F"
+                    value={hufPfForm.hufPan}
+                    onChange={(e) => setHufPfForm({ ...hufPfForm, hufPan: e.target.value })}
+                  />
                 </div>
+                <div>
+                  <Label>Total Assets (₹)</Label>
+                  <Input
+                    type="number"
+                    className="input-premium mt-1"
+                    placeholder="1500000"
+                    value={hufPfForm.hufAssets}
+                    onChange={(e) => setHufPfForm({ ...hufPfForm, hufAssets: e.target.value })}
+                  />
+                </div>
+                <Button variant="outline" className="w-full" onClick={handleHufSubmit}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Save HUF Details
+                </Button>
               </CardContent>
             </Card>
 
             <Card className="glass-card">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <PiggyBank className="w-5 h-5 text-primary" />
-                  Pension & PF
-                </CardTitle>
+                <CardTitle>Pension & PF</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="p-4 rounded-lg bg-secondary/20">
-                    <Label className="text-sm text-muted-foreground">EPF Balance</Label>
-                    <Input
-                      type="number"
-                      className="input-premium mt-1"
-                      placeholder="450000"
-                      value={hufPf?.epfBalance || ''}
-                      onChange={(e) => setHufPf({ ...hufPf, userId: user!.email, epfBalance: parseFloat(e.target.value) })}
-                    />
-                  </div>
-                  <div className="p-4 rounded-lg bg-secondary/20">
-                    <Label className="text-sm text-muted-foreground">NPS</Label>
-                    <Input
-                      type="number"
-                      className="input-premium mt-1"
-                      placeholder="230000"
-                      value={hufPf?.npsBalance || ''}
-                      onChange={(e) => setHufPf({ ...hufPf, userId: user!.email, npsBalance: parseFloat(e.target.value) })}
-                    />
-                  </div>
-                  <Button variant="outline" className="w-full" onClick={() => updateHufPf({ epfBalance: hufPf?.epfBalance, npsBalance: hufPf?.npsBalance })}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Save Pension Details
-                  </Button>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label>EPF Balance (₹)</Label>
+                  <Input
+                    type="number"
+                    className="input-premium mt-1"
+                    placeholder="450000"
+                    value={hufPfForm.epfBalance}
+                    onChange={(e) => setHufPfForm({ ...hufPfForm, epfBalance: e.target.value })}
+                  />
                 </div>
+                <div>
+                  <Label>NPS Balance (₹)</Label>
+                  <Input
+                    type="number"
+                    className="input-premium mt-1"
+                    placeholder="230000"
+                    value={hufPfForm.npsBalance}
+                    onChange={(e) => setHufPfForm({ ...hufPfForm, npsBalance: e.target.value })}
+                  />
+                </div>
+                <Button variant="outline" className="w-full" onClick={handlePensionSubmit}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Save Pension Details
+                </Button>
               </CardContent>
             </Card>
           </div>
