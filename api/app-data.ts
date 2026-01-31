@@ -1,25 +1,32 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import clientPromise from '../src/lib/mongodb';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ message: 'Method Not Allowed' });
+// PRESENTATION MODE: Standalone data
+export default function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
   }
 
-  try {
-    const client = await clientPromise;
-    const db = client.db();
-
-    const rates = await db.collection('marketRates').findOne({});
-    const requests = await db.collection('adminRequests').find({}).sort({ createdAt: -1 }).toArray();
-
-    res.status(200).json({
-      success: true,
-      marketRates: rates,
-      adminRequests: requests,
-    });
-  } catch (error) {
-    console.error('API app-data error:', error);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
-  }
+  res.status(200).json({
+    success: true,
+    marketRates: {
+      goldRate: 6250,
+      silverRate: 78.50,
+      marketIndex: 22456.80,
+      lastUpdated: new Date().toISOString(),
+    },
+    adminRequests: [
+      {
+        _id: '1',
+        userId: 'ganesh@taxora.com',
+        userName: 'Ganesh Kumar',
+        message: 'Need help understanding GST filing for quarterly returns',
+        status: 'pending',
+        createdAt: new Date(Date.now() - 86400000).toISOString(),
+      }
+    ],
+  });
 }

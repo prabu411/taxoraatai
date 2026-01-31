@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import clientPromise from './_lib/mongodb';
 
-// FAILSAFE: Hardcoded demo users in case DB connection fails
+// PRESENTATION MODE: Standalone login without database dependency
 const DEMO_USERS = [
   {
     email: 'admin@admin.com',
@@ -23,37 +22,27 @@ const DEMO_USERS = [
   }
 ];
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default function handler(req: VercelRequest, res: VercelResponse) {
+  // Enable CORS just in case
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method Not Allowed' });
   }
 
   const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required' });
-  }
+  const user = DEMO_USERS.find(u => u.email === email && u.password === password);
 
-  try {
-    // 1. Try to connect to MongoDB
-    const client = await clientPromise;
-    const db = client.db();
-    const userRecord = await db.collection('users').findOne({ email });
-
-    if (userRecord && userRecord.password === password) {
-      const { password: _, ...user } = userRecord;
-      return res.status(200).json({ success: true, user });
-    }
-  } catch (error) {
-    console.error('Database login failed, falling back to demo users:', error);
-  }
-
-  // 2. Fallback: Check hardcoded demo users
-  const demoUser = DEMO_USERS.find(u => u.email === email && u.password === password);
-  if (demoUser) {
-    console.log('Login successful using DEMO USER fallback');
-    const { password: _, ...user } = demoUser;
-    return res.status(200).json({ success: true, user });
+  if (user) {
+    const { password: _, ...userData } = user;
+    return res.status(200).json({ success: true, user: userData });
   }
 
   return res.status(401).json({ success: false, message: 'Invalid credentials' });
