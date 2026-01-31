@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import clientPromise from '../src/lib/mongodb';
+import clientPromise from './_lib/mongodb'; // CORRECTED IMPORT PATH
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
@@ -8,13 +8,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const client = await clientPromise;
-    // Rely on the database name from the connection string
     const db = client.db();
 
-    // Fetch market rates (assuming a single document for rates)
     const rates = await db.collection('marketRates').findOne({});
-
-    // Fetch all admin requests
     const requests = await db.collection('adminRequests').find({}).sort({ createdAt: -1 }).toArray();
 
     res.status(200).json({

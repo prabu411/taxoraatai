@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import clientPromise from '../src/lib/mongodb';
+import clientPromise from './_lib/mongodb'; // CORRECTED IMPORT PATH
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -14,7 +14,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const client = await clientPromise;
-    // Rely on the database name from the connection string
     const db = client.db();
 
     const newRates = {
@@ -24,10 +23,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       lastUpdated: new Date().toISOString(),
     };
 
-    // Using upsert: true will create the document if it doesn't exist,
-    // or update it if it does. We assume there's only one document for market rates.
     const result = await db.collection('marketRates').updateOne(
-      {}, // An empty filter matches the first document in the collection
+      {},
       { $set: newRates },
       { upsert: true }
     );

@@ -1,16 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ObjectId } from 'mongodb';
-import clientPromise from '../src/lib/mongodb';
+import clientPromise from './_lib/mongodb'; // CORRECTED IMPORT PATH
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const client = await clientPromise;
-  // Rely on the database name from the connection string
   const db = client.db();
 
   try {
     switch (req.method) {
       case 'POST':
-        // Create a new request
         const { userId, userName, message } = req.body;
         if (!userId || !userName || !message) {
           return res.status(400).json({ message: 'Missing required fields' });
@@ -27,7 +25,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(201).json({ success: true, request: insertedRequest });
 
       case 'PUT':
-        // Resolve a request
         const { id } = req.body;
         if (!id) {
           return res.status(400).json({ message: 'Request ID is required' });
