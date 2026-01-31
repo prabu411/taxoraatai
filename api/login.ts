@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import clientPromise from './_lib/mongodb'; // CORRECTED IMPORT PATH
 
+// A trivial comment to force a new build cache in Vercel.
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method Not Allowed' });
